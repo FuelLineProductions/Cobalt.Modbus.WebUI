@@ -411,4 +411,4 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
-Cobalt.Modbus.Reader/storage/
+idea/*
