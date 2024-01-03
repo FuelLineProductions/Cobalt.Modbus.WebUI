@@ -1,0 +1,341 @@
+﻿@page "/"
+@using Cobalt.Modbus.FunctionCodes
+@using Cobalt.Modbus.ProtocolDataUnit
+@using Cobalt.Modbus.Device
+@using Cobalt.Modbus.WebUI.ViewModels
+@using System.Net.Sockets
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using System.Text.Unicode
+@using Cobalt.Modbus.Connections
+@inject IModbusPdu ModbusPdu
+@inject IJSRuntime JS
+
+<PageTitle>Modbus TCP Device Communication Tool</PageTitle>
+
+<MudContainer Style="max-width: 85%">
+    <MudText Typo="Typo.h4">Modbus TCP Device Communication Tool</MudText>
+
+    <MudSwitch @bind-Value="ShowAddDevice" Label="Add Device"></MudSwitch>
+    <MudSwitch @bind-Value="ShowAddAccessors" Label="Add Accessors"></MudSwitch>
+
+    @if (ShowAddDevice)
+    {
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h4">Device Setup</MudText>
+            </MudCardHeader>
+            <MudCardActions>
+                <MudTextField @bind-Value="DeviceName" Placeholder="Device Name" Label="Device Name"/>
+                <MudTextField @bind-Value="IpAddress" Placeholder="127.0.0.1" Label="IP Address"/>
+                <MudNumericField @bind-Value="Port" Placeholder="502" Label="Port"/>
+                <MudNumericField @bind-Value="UnitId" Placeholder="0" Label="Unit ID"/>
+                <MudNumericField @bind-Value="ProtocolId" Placeholder="0" Label="Protocol ID"/>
+                <MudNumericField @bind-Value="ReadDelay" Placeholder="2000" Label="Read delay in milliseconds"></MudNumericField>
+            </MudCardActions>
+        </MudCard>
+    }
+    @if (ShowAddAccessors)
+    {
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h4">Accessor Setup</MudText>
+            </MudCardHeader>
+            <MudCardActions>
+                <MudTextField @bind-Value="ReadableName" Label="Modbus Accessor Readable Name" Placeholder="Readable Name"/>
+                <MudSelect T="ModbusFunctionCodes.FunctionCode" @bind-Value="FunctionCode" Label="Function Code">
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadHoldingRegisters">Read Holding Registers</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadCoils">Read Coils</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadDiscreteInputs">Read Discrete Inputs</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteMultipleRegisters">Write Multiple Registers</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadInputRegister">Read Input Register</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteMultipleCoils">Write Multiple Coils</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteSingleCoil">Write Single Coil</MudSelectItem>
+                    <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteSingleRegister">Write Single Register</MudSelectItem>
+                </MudSelect>
+                <MudNumericField @bind-Value="StartingAddress" Placeholder="0" Label="Starting Register Address"/>
+                <MudNumericField @bind-Value="CountOrValue" Placeholder="0" Label="Read count or Write value"/>
+                <MudCheckBox @bind-Value="ReverseReadByteOrder" Label="Reverse Read Byte Order"/>
+                <MudNumericField @bind-Value="WriteValue" Placeholder="Optional additional write value, for example for multiple register write "/>
+                <MudButton OnClick="@AddAccessor">Add Accessor</MudButton>
+            </MudCardActions>
+        </MudCard>
+    }
+    @if (Accessors != null && Accessors.Any())
+    {
+        <MudTable Items="Accessors">
+            <HeaderContent>
+                <MudTh>Accessor Readable Name</MudTh>
+                <MudTh>Function Code</MudTh>
+                <MudTh>Starting Register Address</MudTh>
+                <MudTh>Count Or Value</MudTh>
+                <MudTh>Reverse Response Byte Order</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudTextField @bind-Value="context.ReadableName"></MudTextField>
+                </MudTd>
+                <MudTd>
+                    <MudSelect T="ModbusFunctionCodes.FunctionCode" @bind-Value="context.FunctionCode" Label="Function Code">
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadHoldingRegisters">Read Holding Registers</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadCoils">Read Coils</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadDiscreteInputs">Read Discrete Inputs</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteMultipleRegisters">Write Multiple Registers</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.ReadInputRegister">Read Input Register</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteMultipleCoils">Write Multiple Coils</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteSingleCoil">Write Single Coil</MudSelectItem>
+                        <MudSelectItem Value="ModbusFunctionCodes.FunctionCode.WriteSingleRegister">Write Single Register</MudSelectItem>
+                    </MudSelect>
+                </MudTd>
+                <MudTd>
+                    <MudNumericField @bind-Value="context.StartingRegisterAddress"></MudNumericField>
+                </MudTd>
+                <MudTd>
+                    <MudNumericField @bind-Value="context.CountOrValue"></MudNumericField>
+                </MudTd>
+                <MudTd>
+                    <MudCheckBox Value="@context.ReverseResponseByteOrder"></MudCheckBox>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+
+    <MudCard>
+        <MudCardActions>
+            @if (Accessors != null && Accessors.Any())
+            {
+                <MudButton OnClick="@(() => AddDevice())">Add Device</MudButton>
+            }
+            @if (ModbusDevice != null && ModbusDevice.Accessors.Any())
+            {
+                <MudButton OnClick="@(() => BeginAccess())">Begin Accessor</MudButton>
+            }
+            @if (Continue)
+            {
+                <MudButton OnClick="@(() => ContinueRead())">Stop Accessing</MudButton>
+            }
+            <MudText Color="Color.Error">@DeviceErrorText</MudText>
+        </MudCardActions>
+    </MudCard>
+
+
+    @if (Results != null && Results.Any())
+    {
+        <MudCard>
+            <MudCardContent>
+                <MudIconButton OnClick="DownloadResultsAsync" Variant="Variant.Filled" Color="Color.Info" Icon="@Icons.Material.Filled.Download">
+                    Download File From Stream
+                </MudIconButton>
+                
+
+                <MudTable Items="Results">
+                    <HeaderContent>
+                        <MudTh>Device Name</MudTh>
+                        <MudTh>Register Name</MudTh>
+                        <MudTh>Register Starting Address</MudTh>
+                        <MudTh>Register Span</MudTh>
+                        <MudTh>Raw Hex Content</MudTh>
+                        <MudTh>Bool Value</MudTh>
+                        <MudTh>Byte (UINT8)</MudTh>
+                        <MudTh>UShort (UINT16)</MudTh>
+                        <MudTh>Short (INT16)</MudTh>
+                        <MudTh>UInt (UINT32)</MudTh>
+                        <MudTh>Int (INT32)</MudTh>
+                        <MudTh>Float (Single)</MudTh>
+                        <MudTh>Double</MudTh>
+                        <MudTh>Long (INT64)</MudTh>
+                        <MudTh>ULong (UINT64)</MudTh>
+                        <MudTh>String Representation</MudTh>
+                        <MudTh>Recorded</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.DeviceName</MudTd>
+                        <MudTd>@context.RegisterName</MudTd>
+                        <MudTd>@context.StartingAddress</MudTd>
+                        <MudTd>@context.RegisterSpan</MudTd>
+                        <MudTd>
+                            @(context.RawContent)
+                        </MudTd>
+                        <MudTd>
+                            @(context.BoolValue.HasValue ? context.BoolValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.ByteValue.HasValue ? context.ByteValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.UshortValue.HasValue ? context.UshortValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.ShortValue.HasValue ? context.ShortValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.UintValue.HasValue ? context.UintValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.IntValue.HasValue ? context.IntValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.FloatValue.HasValue ? context.FloatValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.DoubleValue.HasValue ? context.DoubleValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.LongValue.HasValue ? context.LongValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(context.UlongValue.HasValue ? context.UlongValue.Value : "null")
+                        </MudTd>
+                        <MudTd>
+                            @(string.IsNullOrWhiteSpace(context.StringValue) ? "null" : context.StringValue)
+                        </MudTd>
+                        <MudTd>
+                            @context.Recorded
+                        </MudTd>
+                    </RowTemplate>
+                    <PagerContent>
+                        <MudTablePager></MudTablePager>
+                    </PagerContent>
+                </MudTable>
+            </MudCardContent>
+        </MudCard>
+    }
+</MudContainer>
+
+@code{
+
+    private ModbusFunctionCodes.FunctionCode FunctionCode { get; set; } = ModbusFunctionCodes.FunctionCode.ReadHoldingRegisters;
+    private ushort StartingAddress { get; set; }
+    private string ReadableName { get; set; } = "Readable Name";
+    private ushort CountOrValue { get; set; }
+    private bool ReverseReadByteOrder { get; set; } = true;
+    private ushort? WriteValue { get; set; }
+
+    private string IpAddress { get; set; } = "127.0.0.1";
+    private int Port { get; set; } = 502;
+    private byte UnitId { get; set; } = 1;
+    private string DeviceName { get; set; } = "Device Name";
+    private ushort ProtocolId { get; set; }
+
+    private List<ModbusAccessor>? Accessors { get; set; } = [];
+    private ModbusDevice? ModbusDevice { get; set; }
+
+    private List<ModbusDataViewModel>? Results { get; set; } = [];
+
+    private bool Continue { get; set; }
+    private bool ShowAddDevice { get; set; } = true;
+    private bool ShowAddAccessors { get; set; } = true;
+
+    private string DeviceErrorText { get; set; } = string.Empty;
+    private int ReadDelay { get; set; } = 2000;
+
+    private void AddAccessor()
+    {
+        Accessors ??= [];
+        var accessor = new ModbusAccessor(FunctionCode, StartingAddress, ReadableName, CountOrValue, ReverseReadByteOrder, WriteValue);
+        Accessors.Add(accessor);
+        StartingAddress = 0;
+        ReadableName = "Readable Name";
+        CountOrValue = 0;
+        ReverseReadByteOrder = true;
+        WriteValue = null;
+        FunctionCode = ModbusFunctionCodes.FunctionCode.ReadHoldingRegisters;
+        StateHasChanged();
+    }
+
+    private async Task AddDevice()
+    {
+        if (Accessors == null)
+        {
+            DeviceErrorText = "You must add accessors before adding the device";
+            await InvokeAsync(StateHasChanged);
+            return; 
+        }
+        try
+        {
+            ModbusDevice = new ModbusDevice(IpAddress, Port, UnitId, Accessors, DeviceName, ProtocolId);
+            DeviceErrorText = string.Empty;
+        }
+        catch (SocketException ex)
+        {
+            DeviceErrorText = $"Failed to connect to device with error message: {ex.Message}";
+        }
+
+        await ContinueRead();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ContinueRead()
+    {
+        Continue = !Continue;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task BeginAccess()
+    {
+        if (ModbusDevice == null)
+        {
+            DeviceErrorText = "Device has not been setup, how did you trigger this function?";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        Continue = true;
+        await InvokeAsync(StateHasChanged);
+        while (Continue)
+        {
+            ushort transactionId = 0;
+            foreach (var accessor in ModbusDevice.Accessors)
+            {
+                if (!ModbusDevice.TcpConnection.TcpClient.Connected)
+                {
+                    ModbusDevice.TcpConnection =
+                        new TcpConnection(ModbusDevice.TcpConnection.IpAddress, ModbusDevice.TcpConnection.Port);
+                }
+
+                var request = ModbusPdu.BuildPduRequest(accessor);
+                var packet = new ModbusTcpPacket(transactionId, ModbusDevice.UnitId, request.RequestData,
+                    ModbusDevice.ProtocolId);
+                var response = await ModbusDevice.TcpConnection.ReadPacket(packet.PacketAsByteArray());
+                try
+                {
+                    var registerValue = ModbusPdu.ReadResponse(response);
+                    registerValue.ConvertContentToType(accessor.ReverseResponseByteOrder);
+                    var dataView = new ModbusDataViewModel(ModbusDevice, accessor, registerValue);
+                    Results ??= [];
+                    Results.Add(dataView);
+                    transactionId++;
+                }
+                catch (InvalidDataException ex)
+                {
+                    Continue = false;
+                    DeviceErrorText = $"Register {accessor.ReadableName}(Address {accessor.StartingRegisterAddress} + Span {accessor.CountOrValue}) has thrown a modbus error: {ex.Message})";
+                }
+                catch (InvalidOperationException)
+                {
+                    // Just eat this for now it usually occurs on write multiple registers but is generally fine
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+
+            await Task.Delay(ReadDelay);
+        }
+    }
+
+    private async Task DownloadResultsAsync()
+    {
+        var serializerOptions = new JsonSerializerOptions()
+        {
+            WriteIndented = true,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+        };
+
+       var serial = JsonSerializer.Serialize(Results, serializerOptions);
+       var serialBytes = System.Text.Encoding.UTF8.GetBytes(serial);
+       var memoryStream = new MemoryStream(serialBytes);
+       var streamRef = new DotNetStreamReference(memoryStream);
+       await JS.InvokeVoidAsync("downloadFileFromStream", $@"{ModbusDevice?.Name} Results {@DateTime.UtcNow:yyyy-MM-dd hh mm ss}.json", streamRef);
+    }
+
+}
